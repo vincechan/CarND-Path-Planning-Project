@@ -94,9 +94,16 @@ int main()
 					map_waypoints_dy);
 
 	planner.InitRoad(
-		3,	 // number of lanes
-		4.0,   // lane width
-		50.0); // speed limit in miles per hour
+		3,   // number of lanes
+		4.0, // lane width
+		50.0 // speed limit in miles per hour
+		);
+
+	planner.InitConfig(
+		50,  // number of points to generate for next path
+		50,  // max last path reuse size
+		0.02 // time delta between each point
+		);
 
 	h.onMessage([&map_waypoints_x, &map_waypoints_y, &map_waypoints_s, &map_waypoints_dx, &map_waypoints_dy](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length,
 																											 uWS::OpCode opCode) {

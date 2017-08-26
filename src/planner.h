@@ -13,7 +13,8 @@ using namespace std;
 
 #define MILES2METERS 1609.34
 #define HOURS2SECONDS 1.0 / 3600
-#define MAX_ACCELERATION 10.O
+#define MILES_PER_HOUR_2_METERS_PER_SECOND 0.44704
+#define MAX_ACCELERATION 10.
 
 class Planner
 {
@@ -23,6 +24,13 @@ class Planner
     virtual ~Planner() {}
 
     tuple<vector<double>, vector<double>> PlanPath();
+
+    void InitConfig(int nextPathSize, int maxLastPathReuseSize, double dt)
+    {
+        nextPathSize_ = nextPathSize;
+        maxLastPathReuseSize_ = maxLastPathReuseSize;
+        dt_ = dt;
+    }
 
     /*
      * Initialize map data 
@@ -54,6 +62,20 @@ class Planner
 
   private:
     /**
+     * Config data
+     */
+    // maximun number of points from previous path we will reuse
+    // smaller number - more responsive to current road condition
+    // bigger number - more smooth and less calculations
+    int maxLastPathReuseSize_ = 10;
+
+    // Number of points to return when we generate a path
+    int nextPathSize_ = 50;
+
+    // time difference between each point
+    double dt_ = 0.02;
+
+    /**
      * Map data
      */
     vector<double> map_x_;
@@ -65,9 +87,12 @@ class Planner
     /**
      * Road data
      */
-    int numberOfLanes_;
-    double laneWidth_;
-    double speedLimit_;
+    int roadCount_;
+    double roadWidth_;
+    double roadSpeedLimit_;
+
+    // how fast we allow the car to go
+    double max_v_;
 
     /**
      * Car current state data
@@ -77,9 +102,11 @@ class Planner
     double car_s_;
     double car_d_;
     double car_yaw_;
-    double car_speed_;
+    double car_speed_; // car speed in miles per hour
+    double car_v_;     // car velocity in meters per second
+
     // The car is currently in this lane.
-    // 0 is the left most lane. numberOfLanes_ - 1 is the right most lane.
+    // 0 is the left most lane. roadCount_ - 1 is the right most lane.
     int car_lane_;
 
     /**
@@ -89,6 +116,7 @@ class Planner
     vector<double> last_path_y_;
     double last_path_end_s_;
     double last_path_end_d_;
+    int last_path_reuse_size_;
 
     /**
      * Sensor fusion data
@@ -101,11 +129,20 @@ class Planner
     double ref_x_;
     double ref_y_;
     double ref_yaw_;
+    double ref_v_;
+    double ref_d_;
+    double ref_s_;
+    int ref_lane_;
+
+    int target_lane_;
+    double target_v_;
 
     /**
-     * Compute the reference point. This is the first point in our new path
+     * Compute the reference state.
+     * We are reusing some points from previous path. The reference state
+     * is the car state when previous path reuse point ends.
      */
-    void ComputeReferencePoint();
+    void ComputeReferenceState();
 
     /**
      * Create a spline from the reference point
@@ -113,14 +150,40 @@ class Planner
     tk::spline ComputeSpline();
 
     /**
-     * Return the a car is in given the d value
+     * Return the lane given the d value
      */
     int GetLane(double d);
 
+    tuple<vector<double>, vector<double>> GenerateTrajectory();
+
     /**
-     * Return whehter another car is in the same lane given it's d value.
+     * Determine the target speed and lane the car should take
      */
-    bool IsInSameLane(int other_car_d);
+    void PlanTargetLaneAndSpeed();
+
+    /**
+     * Adjust the speed of the car
+     * The function will handle the rate of change so that it does not violate acceleration limit.
+     */
+    double AdjustSpeed(double current_v, double target_v)
+    {
+        cout << " adjusting speed target " << target_v << " from " << current_v;
+        double step_v = MAX_ACCELERATION * 0.5 * dt_;
+
+        if (current_v < target_v)
+        {
+            current_v += step_v;
+            current_v = min(target_v, current_v);
+        }
+        else if (current_v > target_v)
+        {
+            current_v -= step_v;
+            current_v = max(target_v, current_v);
+        }
+
+        cout << " to " << current_v << endl;
+        return current_v;
+    }
 
     /**
      * convert local coordinates back to global coordinates
