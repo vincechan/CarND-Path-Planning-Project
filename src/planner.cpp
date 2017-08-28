@@ -7,6 +7,17 @@
 
 using namespace std;
 
+void Planner::ExecutePlanner()
+{
+    ComputeReferenceState();
+
+    PerformPrediction();
+
+    PerformBehaviorPlanning();
+
+    PerformTrajectoryGeneration();
+}
+
 void Planner::ComputeReferenceState()
 {
     if (last_path_reuse_size_ >= 2)
@@ -97,20 +108,93 @@ int Planner::GetLane(double d)
     return d / this->roadWidth_;
 }
 
-tuple<vector<double>, vector<double>> Planner::GenerateTrajectory()
+void Planner::PerformPrediction()
 {
-    vector<double> result_path_x;
-    vector<double> result_path_y;
+    // Perform prediction of other cars on the road
+    //
+    // We are only predicting the closest car in front and behind in each lane,
+    // not every cars visible
+    //
+    // We predict other cars at some time after we recevie the sensor fusion data.
+    // Specifically, we are reusing points from previous path, our prediction starts
+    // when the previous path points end.
+
+    predictedRoadAheadGap_.clear();
+    predictedRoadBehindGap_.clear();
+    predictedRoadAheadSpeed_.clear();
+    predictedRoadBehindSpeed_.clear();
+
+    for (size_t i = 0; i < roadCount_; i++)
+    {
+        predictedRoadAheadGap_.push_back(999.0);
+        predictedRoadBehindGap_.push_back(999.0);
+        predictedRoadAheadSpeed_.push_back(max_v_);
+        predictedRoadBehindSpeed_.push_back(0.0);
+    }
+
+    // compute prediction start time
+    double time_gap = dt_ * last_path_reuse_size_;
+    
+    for (size_t i = 0; i < sensor_fusion_.size(); i++)
+    {
+        double vx = sensor_fusion_[i][3];
+        double vy = sensor_fusion_[i][4];
+        double s = sensor_fusion_[i][5];
+        float d = sensor_fusion_[i][6];
+        float lane = GetLane(d);
+
+        // compute speed
+        double v = sqrt(vx * vx + vy * vy);
+
+        // compute prediction start s
+        double start_s = s + time_gap * v;
+
+        // compute the s difference between this car and our car
+        double s_diff = fabs(start_s - ref_s_);
+
+        // do not consider cars that are too far away
+        if (s_diff > roadVisibility_)
+        {
+            continue;
+        }
+
+        // if this car is in front
+        if (start_s > ref_s_)
+        {
+            // and this car is closer
+            if (s_diff < predictedRoadAheadGap_[lane])
+            {
+                // update prediction
+                predictedRoadAheadGap_[lane] = s_diff;
+                predictedRoadAheadSpeed_[lane] = v;
+            }
+        }
+        else
+        {
+            // this car is behind
+            if (s_diff < predictedRoadBehindGap_[lane])
+            {
+                predictedRoadBehindGap_[lane] = s_diff;
+                predictedRoadBehindSpeed_[lane] = v;
+            }
+        }
+    }
+}
+
+void Planner::PerformTrajectoryGeneration()
+{
+    next_path_x.clear();
+    next_path_y.clear();
 
     // add points from previous path to reuse them
     // we are only going to reuse up to [last_path_reuse_size_] number of points
-    result_path_x.insert(result_path_x.end(), last_path_x_.begin(), last_path_x_.begin() + last_path_reuse_size_);
-    result_path_y.insert(result_path_y.end(), last_path_y_.begin(), last_path_y_.begin() + last_path_reuse_size_);
+    next_path_x.insert(next_path_x.end(), last_path_x_.begin(), last_path_x_.begin() + last_path_reuse_size_);
+    next_path_y.insert(next_path_y.end(), last_path_y_.begin(), last_path_y_.begin() + last_path_reuse_size_);
 
     // create a spline
     // The spline will help to minimize the jerk
     // By controlling the distance between the points we pick, we can control
-    // the velocity
+    // the velocity and acceleration
     tk::spline s = ComputeSpline();
 
     double target_x = 30.0;
@@ -139,10 +223,10 @@ tuple<vector<double>, vector<double>> Planner::GenerateTrajectory()
     ToGlobalCoordinates(new_path_x, new_path_y, this->ref_x_, this->ref_y_, this->ref_yaw_);
 
     // add the newly generated points to the resulting path
-    result_path_x.insert(result_path_x.end(), new_path_x.begin(), new_path_x.end());
-    result_path_y.insert(result_path_y.end(), new_path_y.begin(), new_path_y.end());
+    next_path_x.insert(next_path_x.end(), new_path_x.begin(), new_path_x.end());
+    next_path_y.insert(next_path_y.end(), new_path_y.begin(), new_path_y.end());
 
-    return make_tuple(result_path_x, result_path_y);
+    cout << "new path size " << new_path_x.size() << endl;
 }
 
 void Planner::InitMap(vector<double> &maps_x, vector<double> &maps_y,
@@ -155,100 +239,33 @@ void Planner::InitMap(vector<double> &maps_x, vector<double> &maps_y,
     map_dy_ = maps_dy;
 }
 
-void Planner::InitRoad(int numberOfLanes, double laneWidth, double speedLimit)
+void Planner::InitRoad(int numberOfLanes, double laneWidth, double speedLimit, double visibility)
 {
     roadCount_ = numberOfLanes;
     roadWidth_ = laneWidth;
     roadSpeedLimit_ = speedLimit;
+    roadVisibility_ = visibility;
 
     max_v_ = (roadSpeedLimit_ - 1.0) * MILES_PER_HOUR_2_METERS_PER_SECOND;
 }
 
-tuple<vector<double>, vector<double>> Planner::PlanPath()
-{
-    // calculate the reference state
-    ComputeReferenceState();
-
-    PlanTargetLaneAndSpeed();
-
-    return GenerateTrajectory();
-}
-
-void Planner::PlanTargetLaneAndSpeed()
+void Planner::PerformBehaviorPlanning()
 {
     target_lane_ = ref_lane_;
-    target_v_ = ref_v_;
     target_v_ = max_v_;
 
-    // stores speed and distance of the closest car in front in each lane
-    vector<double> laneAheadGap;
-    vector<double> laneBehindGap;
-    vector<double> laneAheadSpeed;
-    vector<double> laneBehindSpeed;
-    for (size_t i = 0; i < roadCount_; i++)
-    {
-        laneAheadGap.push_back(999.0);
-        laneBehindGap.push_back(999.0);
-        laneAheadSpeed.push_back(max_v_);
-        laneBehindSpeed.push_back(0.0);
-    }
-
-    // we are reusing some previous points, predict where this car will be
-    // when our car finished executing the previous points
-    double time_gap = dt_ * last_path_reuse_size_;
-    for (size_t i = 0; i < sensor_fusion_.size(); i++)
-    {
-        double vx = sensor_fusion_[i][3];
-        double vy = sensor_fusion_[i][4];
-        double s = sensor_fusion_[i][5];
-        float d = sensor_fusion_[i][6];
-        float lane = GetLane(d);
-
-        // compute speed
-        double v = sqrt(vx * vx + vy * vy);
-
-        double start_s = s + time_gap * v;
-
-        double s_diff = fabs(start_s - ref_s_);
-
-        // do not consider cars that are too far away
-        if (s_diff > 200.0)
-        {
-            continue;
-        }
-
-        if (start_s > ref_s_)
-        {
-            // this car is in front
-            if (s_diff < laneAheadGap[lane])
-            {
-                laneAheadGap[lane] = s_diff;
-                laneAheadSpeed[lane] = v;
-            }
-        }
-        else
-        {
-            // this car is behind
-            if (s_diff < laneBehindGap[lane])
-            {
-                laneBehindGap[lane] = s_diff;
-                laneBehindSpeed[lane] = v;
-            }
-        }
-    }
-
     double safeDistance = 30.0;
-    double stayInLaneIncentive = 4.0;
+    double changeLaneCost = 4.0;
 
     // set best lane to current lane
     int bestLane = ref_lane_;
-    double bestLaneSpeed = laneAheadSpeed[ref_lane_];
-    double bestLaneGap = laneAheadGap[ref_lane_];
-    if (laneAheadGap[ref_lane_] > safeDistance)
+    double bestLaneSpeed = predictedRoadAheadSpeed_[ref_lane_];
+    double bestLaneGap = predictedRoadAheadGap_[ref_lane_];
+    if (predictedRoadAheadGap_[ref_lane_] > safeDistance)
     {
         bestLaneSpeed = max_v_;
     }
-    double bestLaneProjectedGap = laneAheadGap[ref_lane_] + stayInLaneIncentive + (bestLaneSpeed * dt_ * 50);
+    double bestLaneProjectedGap = predictedRoadAheadGap_[ref_lane_] + (bestLaneSpeed * dt_ * 50);
 
     // consider changing lane
     int leftLane = ref_lane_ - 1;
@@ -258,13 +275,13 @@ void Planner::PlanTargetLaneAndSpeed()
     if (leftLane >= 0)
     {
         // and it's safe to change
-        // if (laneBehindGap[leftLane] >= 8 ||
-        //     (laneBehindSpeed[leftLane] < ref_v_ && laneBehindGap[leftLane]))
-        if (laneBehindGap[leftLane] >= 6 &&
-            laneAheadGap[leftLane] >= 15)
+        // if (predictedRoadBehindGap_[leftLane] >= 8 ||
+        //     (predictedRoadBehindSpeed_[leftLane] < ref_v_ && predictedRoadBehindGap_[leftLane]))
+        if (predictedRoadBehindGap_[leftLane] >= 6 &&
+            predictedRoadAheadGap_[leftLane] >= 15)
         {
-            double leftLaneSpeed = laneAheadSpeed[leftLane];
-            double leftLaneGap = laneAheadGap[leftLane];
+            double leftLaneSpeed = predictedRoadAheadSpeed_[leftLane];
+            double leftLaneGap = predictedRoadAheadGap_[leftLane];
             if (leftLaneGap > safeDistance)
             {
                 leftLaneSpeed = max_v_;
@@ -283,13 +300,13 @@ void Planner::PlanTargetLaneAndSpeed()
     if (rightLane <= roadCount_ - 1)
     {
         // and it's safe to change lane
-        // if (laneBehindGap[rightLane] >= 8 ||
-        //     (laneBehindGap[rightLane] >= 4 && laneBehindSpeed[rightLane] < ref_v_))
-        if (laneBehindGap[rightLane] >= 6 &&
-            laneAheadGap[rightLane] >= 15)
+        // if (predictedRoadBehindGap_[rightLane] >= 8 ||
+        //     (predictedRoadBehindGap_[rightLane] >= 4 && predictedRoadBehindSpeed_[rightLane] < ref_v_))
+        if (predictedRoadBehindGap_[rightLane] >= 6 &&
+            predictedRoadAheadGap_[rightLane] >= 15)
         {
-            double rightLaneSpeed = laneAheadSpeed[rightLane];
-            double rightLaneGap = laneAheadGap[rightLane];
+            double rightLaneSpeed = predictedRoadAheadSpeed_[rightLane];
+            double rightLaneGap = predictedRoadAheadGap_[rightLane];
             if (rightLaneGap > safeDistance)
             {
                 rightLaneSpeed = max_v_;

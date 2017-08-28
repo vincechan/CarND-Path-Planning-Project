@@ -11,8 +11,6 @@
 
 using namespace std;
 
-#define MILES2METERS 1609.34
-#define HOURS2SECONDS 1.0 / 3600
 #define MILES_PER_HOUR_2_METERS_PER_SECOND 0.44704
 #define MAX_ACCELERATION 10.
 
@@ -23,7 +21,16 @@ class Planner
 
     virtual ~Planner() {}
 
-    tuple<vector<double>, vector<double>> PlanPath();
+    /**
+     * New path data
+     */
+    vector<double> next_path_x;
+    vector<double> next_path_y;
+
+    /**
+     * Run path planner to plan and return a new set of points the car should follow.
+     */
+    void ExecutePlanner();
 
     void InitConfig(int nextPathSize, int maxLastPathReuseSize, double dt)
     {
@@ -41,7 +48,7 @@ class Planner
     /**
      * Initialize road data
      */
-    void InitRoad(int numberOfLanes, double laneWidth, double speedLimit);
+    void InitRoad(int numberOfLanes, double laneWidth, double speedLimit, double roadVisibility);
 
     /**
      * Update car data
@@ -90,6 +97,19 @@ class Planner
     int roadCount_;
     double roadWidth_;
     double roadSpeedLimit_;
+    double roadVisibility_;
+
+    /**
+     * Road prediction data
+     */
+    // gap of the car in front in each lane
+    vector<double> predictedRoadAheadGap_;
+    // gap of the car behind in each lane
+    vector<double> predictedRoadBehindGap_;
+    // speed of the car in front in each lane
+    vector<double> predictedRoadAheadSpeed_;
+    // speed of the car behind in each lane
+    vector<double> predictedRoadBehindSpeed_;;
 
     // how fast we allow the car to go
     double max_v_;
@@ -154,12 +174,20 @@ class Planner
      */
     int GetLane(double d);
 
-    tuple<vector<double>, vector<double>> GenerateTrajectory();
+    /**
+     * Perform behavior planning.
+     */
+    void PerformBehaviorPlanning();
 
     /**
-     * Determine the target speed and lane the car should take
+     * Perform prediction of other cars on the road.
      */
-    void PlanTargetLaneAndSpeed();
+    void PerformPrediction();
+
+    /**
+     * Perform trajectory generation.
+     */
+    void PerformTrajectoryGeneration();
 
     /**
      * Adjust the speed of the car
@@ -168,6 +196,7 @@ class Planner
     double AdjustSpeed(double current_v, double target_v)
     {
         cout << " adjusting speed target " << target_v << " from " << current_v;
+
         double step_v = MAX_ACCELERATION * 0.5 * dt_;
 
         if (current_v < target_v)

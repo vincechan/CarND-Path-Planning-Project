@@ -94,9 +94,10 @@ int main()
 					map_waypoints_dy);
 
 	planner.InitRoad(
-		3,   // number of lanes
-		4.0, // lane width
-		50.0 // speed limit in miles per hour
+		3,	// number of lanes
+		4.0,  // lane width
+		50.0, // speed limit in miles per hour
+		200   // visibility in meters - how far the car can see
 		);
 
 	planner.InitConfig(
@@ -152,13 +153,11 @@ int main()
 					planner.UpdateSensorFusionState(sensor_fusion);
 
 					// Plan next path
-					vector<double> path_x;
-					vector<double> path_y;
-					std::tie(path_x, path_y) = planner.PlanPath();
+					planner.ExecutePlanner();
 
 					json msgJson;
-					msgJson["next_x"] = path_x;
-					msgJson["next_y"] = path_y;
+					msgJson["next_x"] = planner.next_path_x;
+					msgJson["next_y"] = planner.next_path_y;
 
 					auto msg = "42[\"control\"," + msgJson.dump() + "]";
 
