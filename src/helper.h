@@ -47,9 +47,9 @@ int NextWaypoint(double x, double y, double theta, vector<double> maps_x, vector
 
     double angle = abs(theta - heading);
 
-    if (angle > pi() / 4)
+    if(angle > pi()/2)
     {
-        closestWaypoint++;
+     closestWaypoint = (closestWaypoint + 1) % maps_x.size();
     }
 
     return closestWaypoint;
@@ -108,7 +108,7 @@ vector<double> getXY(double s, double d, vector<double> maps_s, vector<double> m
 {
     int prev_wp = -1;
 
-    while (s > maps_s[prev_wp + 1] && (prev_wp < (int)(maps_s.size() - 1)))
+    while ((prev_wp < (int)(maps_s.size() - 1)) && s > maps_s[prev_wp + 1])
     {
         prev_wp++;
     }
