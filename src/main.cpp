@@ -97,7 +97,7 @@ int main()
 		3,	// number of lanes
 		4.0,  // lane width
 		50.0, // speed limit in miles per hour
-		200   // visibility in meters - how far the car can see
+		120   // visibility in meters - how far the car can see
 		);
 
 	planner.InitConfig(
