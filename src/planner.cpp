@@ -134,7 +134,7 @@ void Planner::PerformPrediction()
 
     // compute prediction start time
     double time_gap = dt_ * last_path_reuse_size_;
-    
+
     for (size_t i = 0; i < sensor_fusion_.size(); i++)
     {
         double vx = sensor_fusion_[i][3];
@@ -183,6 +183,15 @@ void Planner::PerformPrediction()
 
 void Planner::PerformTrajectoryGeneration()
 {
+    if (ref_lane_ == target_lane_)
+    {
+        accelerationFactor_ = 0.5;
+    }
+    else
+    {
+        accelerationFactor_ = 0.3;
+    }
+
     next_path_x.clear();
     next_path_y.clear();
 
@@ -277,7 +286,7 @@ void Planner::PerformBehaviorPlanning()
         // and it's safe to change
         // if (predictedRoadBehindGap_[leftLane] >= 8 ||
         //     (predictedRoadBehindSpeed_[leftLane] < ref_v_ && predictedRoadBehindGap_[leftLane]))
-        if (predictedRoadBehindGap_[leftLane] >= 6 &&
+        if (predictedRoadBehindGap_[leftLane] >= 8 &&
             predictedRoadAheadGap_[leftLane] >= 15)
         {
             double leftLaneSpeed = predictedRoadAheadSpeed_[leftLane];
@@ -302,7 +311,7 @@ void Planner::PerformBehaviorPlanning()
         // and it's safe to change lane
         // if (predictedRoadBehindGap_[rightLane] >= 8 ||
         //     (predictedRoadBehindGap_[rightLane] >= 4 && predictedRoadBehindSpeed_[rightLane] < ref_v_))
-        if (predictedRoadBehindGap_[rightLane] >= 6 &&
+        if (predictedRoadBehindGap_[rightLane] >= 8 &&
             predictedRoadAheadGap_[rightLane] >= 15)
         {
             double rightLaneSpeed = predictedRoadAheadSpeed_[rightLane];

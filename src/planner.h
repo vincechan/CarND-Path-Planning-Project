@@ -82,6 +82,10 @@ class Planner
     // time difference between each point
     double dt_ = 0.02;
 
+    // we multiple this to the maximum allowed acceleration
+    // to control the rate of acceleration.
+    double accelerationFactor_ = 0.5;
+
     /**
      * Map data
      */
@@ -109,7 +113,8 @@ class Planner
     // speed of the car in front in each lane
     vector<double> predictedRoadAheadSpeed_;
     // speed of the car behind in each lane
-    vector<double> predictedRoadBehindSpeed_;;
+    vector<double> predictedRoadBehindSpeed_;
+    ;
 
     // how fast we allow the car to go
     double max_v_;
@@ -197,7 +202,7 @@ class Planner
     {
         cout << " adjusting speed target " << target_v << " from " << current_v;
 
-        double step_v = MAX_ACCELERATION * 0.5 * dt_;
+        double step_v = MAX_ACCELERATION * accelerationFactor_ * dt_;
 
         if (current_v < target_v)
         {
