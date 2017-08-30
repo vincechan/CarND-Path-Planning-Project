@@ -86,6 +86,8 @@ class Planner
     // to control the rate of acceleration.
     double accelerationFactor_ = 0.5;
 
+    int totalPointsTraveled = 0;
+
     /**
      * Map data
      */
@@ -114,7 +116,6 @@ class Planner
     vector<double> predictedRoadAheadSpeed_;
     // speed of the car behind in each lane
     vector<double> predictedRoadBehindSpeed_;
-    ;
 
     // how fast we allow the car to go
     double max_v_;
@@ -200,12 +201,17 @@ class Planner
      */
     double AdjustSpeed(double current_v, double target_v)
     {
-        cout << " adjusting speed target " << target_v << " from " << current_v;
+        //cout << " adjusting speed target " << target_v << " from " << current_v;
 
         double step_v = MAX_ACCELERATION * accelerationFactor_ * dt_;
 
         if (current_v < target_v)
         {
+            // // adjust the acceleration when we are close to the limit
+            // if (current_v + 0.2 >= max_v_) {
+            //     step_v = step_v / 5;
+            // }
+
             current_v += step_v;
             current_v = min(target_v, current_v);
         }
@@ -215,7 +221,7 @@ class Planner
             current_v = max(target_v, current_v);
         }
 
-        cout << " to " << current_v << endl;
+        //cout << " to " << current_v << endl;
         return current_v;
     }
 

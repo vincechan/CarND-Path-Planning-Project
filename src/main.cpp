@@ -59,7 +59,8 @@ int main()
 	vector<double> map_waypoints_dy;
 
 	// Waypoint map to read from
-	string map_file_ = "../data/highway_map.csv";
+	//string map_file_ = "../data/highway_map.csv";
+	string map_file_ = "../data/highway_map_bosch1.csv";
 	// The max s value before wrapping around the track back to 0
 	double max_s = 6945.554;
 
@@ -97,12 +98,12 @@ int main()
 		3,	// number of lanes
 		4.0,  // lane width
 		50.0, // speed limit in miles per hour
-		120   // visibility in meters - how far the car can see
+		60   // visibility in meters - how far the car can see
 		);
 
 	planner.InitConfig(
-		50,  // number of points to generate for next path
-		50,  // max last path reuse size
+		30,  // number of points to generate for next path
+		30,  // max last path reuse size
 		0.02 // time delta between each point
 		);
 

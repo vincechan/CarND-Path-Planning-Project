@@ -50,8 +50,6 @@ void Planner::ComputeReferenceState()
 
     // determine the lane the car is in
     ref_lane_ = GetLane(ref_d_);
-
-    cout << "Car reference v " << ref_v_ << endl;
 }
 
 tk::spline Planner::ComputeSpline()
@@ -183,16 +181,6 @@ void Planner::PerformPrediction()
 
 void Planner::PerformTrajectoryGeneration()
 {
-    // adjust how hard we accelerate depends on whether we are changing lane
-    if (ref_lane_ == target_lane_)
-    {
-        accelerationFactor_ = 0.5;
-    }
-    else
-    {
-        accelerationFactor_ = 0.2;
-    }
-
     next_path_x.clear();
     next_path_y.clear();
 
@@ -207,7 +195,7 @@ void Planner::PerformTrajectoryGeneration()
     // the velocity and acceleration
     tk::spline s = ComputeSpline();
 
-    double target_x = 30.0;
+    double target_x = 50.0;
     double target_y = s(target_x);
     double target_dist = sqrt(target_x * target_x + target_y * target_y);
     double x_add_on = 0;
@@ -235,8 +223,6 @@ void Planner::PerformTrajectoryGeneration()
     // add the newly generated points to the resulting path
     next_path_x.insert(next_path_x.end(), new_path_x.begin(), new_path_x.end());
     next_path_y.insert(next_path_y.end(), new_path_y.begin(), new_path_y.end());
-
-    cout << "new path size " << new_path_x.size() << endl;
 }
 
 void Planner::InitMap(vector<double> &maps_x, vector<double> &maps_y,
@@ -256,7 +242,7 @@ void Planner::InitRoad(int numberOfLanes, double laneWidth, double speedLimit, d
     roadSpeedLimit_ = speedLimit;
     roadVisibility_ = visibility;
 
-    max_v_ = (roadSpeedLimit_ - 1.0) * MILES_PER_HOUR_2_METERS_PER_SECOND;
+    max_v_ = (roadSpeedLimit_ - 0.15) * MILES_PER_HOUR_2_METERS_PER_SECOND;
 }
 
 void Planner::PerformBehaviorPlanning()
@@ -264,13 +250,13 @@ void Planner::PerformBehaviorPlanning()
     target_lane_ = ref_lane_;
     target_v_ = max_v_;
 
-    double safeDistance = 30.0;
-    double changeLaneCost = 4.0;
+    double safeChangeLaneDistance = 9.0;
+    double changeLaneCost = 6.0;
 
-    vector<double> laneCost;
+    vector<double> laneScore;
     for (size_t i = 0; i < roadCount_; i++)
     {
-        laneCost.push_back(0);
+        laneScore.push_back(0);
     }
 
     for (size_t i = 0; i < roadCount_; i++)
@@ -285,10 +271,10 @@ void Planner::PerformBehaviorPlanning()
         else if (i == ref_lane_ - 2)
         {
             // left 2 lane
-            if (!(predictedRoadBehindGap_[ref_lane_ - 1] >= 8 &&
-                  predictedRoadAheadGap_[ref_lane_ - 1] >= 8 &&
-                  predictedRoadBehindGap_[ref_lane_ - 2] >= 16 &&
-                  predictedRoadAheadGap_[ref_lane_ - 2] >= 16))
+            if (!(predictedRoadBehindGap_[ref_lane_ - 1] >= safeChangeLaneDistance &&
+                  predictedRoadAheadGap_[ref_lane_ - 1] >= safeChangeLaneDistance &&
+                  predictedRoadBehindGap_[ref_lane_ - 2] >= safeChangeLaneDistance * 2 &&
+                  predictedRoadAheadGap_[ref_lane_ - 2] >= safeChangeLaneDistance * 2))
             {
                 continue;
             }
@@ -296,8 +282,8 @@ void Planner::PerformBehaviorPlanning()
         else if (i == ref_lane_ - 1)
         {
             // left 1 lane
-            if (!(predictedRoadBehindGap_[ref_lane_ - 1] >= 8 &&
-                  predictedRoadAheadGap_[ref_lane_ - 1] >= 8))
+            if (!(predictedRoadBehindGap_[ref_lane_ - 1] >= safeChangeLaneDistance &&
+                  predictedRoadAheadGap_[ref_lane_ - 1] >= safeChangeLaneDistance))
             {
                 continue;
             }
@@ -305,8 +291,8 @@ void Planner::PerformBehaviorPlanning()
         else if (i == ref_lane_ + 1)
         {
             // right 1 lane
-            if (!(predictedRoadBehindGap_[ref_lane_ + 1] >= 8 &&
-                  predictedRoadAheadGap_[ref_lane_ + 1] >= 8))
+            if (!(predictedRoadBehindGap_[ref_lane_ + 1] >= safeChangeLaneDistance &&
+                  predictedRoadAheadGap_[ref_lane_ + 1] >= safeChangeLaneDistance))
             {
                 continue;
             }
@@ -314,10 +300,10 @@ void Planner::PerformBehaviorPlanning()
         else if (i == ref_lane_ + 2)
         {
             // right 2 lane
-            if (!(predictedRoadBehindGap_[ref_lane_ + 1] >= 8 &&
-                  predictedRoadAheadGap_[ref_lane_ + 1] >= 8 &&
-                  predictedRoadBehindGap_[ref_lane_ + 2] >= 16 &&
-                  predictedRoadAheadGap_[ref_lane_ + 2] >= 16))
+            if (!(predictedRoadBehindGap_[ref_lane_ + 1] >= safeChangeLaneDistance &&
+                  predictedRoadAheadGap_[ref_lane_ + 1] >= safeChangeLaneDistance &&
+                  predictedRoadBehindGap_[ref_lane_ + 2] >= safeChangeLaneDistance * 2 &&
+                  predictedRoadAheadGap_[ref_lane_ + 2] >= safeChangeLaneDistance * 2))
             {
                 continue;
             }
@@ -331,9 +317,17 @@ void Planner::PerformBehaviorPlanning()
 
         double speed = predictedRoadAheadSpeed_[i];
         double gap = predictedRoadAheadGap_[i];
-        if (gap > safeDistance)
+        if (gap <= 10)
+        {
+            // slow down to slower than the car in front
+            speed = speed - 10;
+        }
+        else if (gap >= 30)
         {
             speed = max_v_;
+        }
+        else {
+            speed = speed + 1; // close in the gap
         }
 
         int numberOfLaneSwitch = ref_lane_ - i;
@@ -341,17 +335,18 @@ void Planner::PerformBehaviorPlanning()
         {
             numberOfLaneSwitch = numberOfLaneSwitch * -1;
         }
-        laneCost[i] = gap - (numberOfLaneSwitch * changeLaneCost) + (speed * dt_ * 50);
+
+        // calculate the lane score using a combination of available gap, change lane cost, and speed
+        laneScore[i] = min(gap, 200.0) - (numberOfLaneSwitch * changeLaneCost) + (speed * dt_ * nextPathSize_);
     }
 
     int bestLane = ref_lane_;
-    double bestLaneCost = laneCost[ref_lane_];
+    double bestlaneScore = laneScore[ref_lane_];
     for (size_t i = 0; i < roadCount_; i++)
     {
-        //cout << "lane " << i << " cost " << laneCost[i] << endl;
-        if (laneCost[i] > bestLaneCost)
+        if (laneScore[i] > bestlaneScore)
         {
-            bestLaneCost = laneCost[i];
+            bestlaneScore = laneScore[i];
             bestLane = i;
         }
     }
@@ -360,7 +355,7 @@ void Planner::PerformBehaviorPlanning()
     if (laneChange > 1 || laneChange < -1)
     {
         // we need to change more than 1 lane
-        // the tranjectory generation couldn't handle this without violating acceleration limit in the simulator
+        // the trajectory generation couldn't handle this without violating acceleration limit in the simulator
         // we will suggest changing one lane first
         target_lane_ = 1;
     }
@@ -369,13 +364,61 @@ void Planner::PerformBehaviorPlanning()
         target_lane_ = bestLane;
     }
 
-    target_v_ = predictedRoadAheadSpeed_[target_lane_];
-    if (predictedRoadAheadGap_[target_lane_] > safeDistance)
+    if (predictedRoadAheadGap_[target_lane_] <= 10)
+    {
+        // slow down to slower than the car in front
+        target_v_ = predictedRoadAheadSpeed_[target_lane_] - 5;
+    }
+    else if (predictedRoadAheadGap_[target_lane_] >= 30)
+    {
+        target_v_ = max_v_;
+    }
+    else {
+        target_v_ = predictedRoadAheadSpeed_[target_lane_] + 1;
+    }
+
+    // if the traffic on the road is faster than speed limit, we will stick with speed limit
+    if (target_v_ > max_v_)
     {
         target_v_ = max_v_;
     }
 
-    cout << "target lane " << target_lane_ << " speed " << target_v_ << endl;
+    // adjust how hard we accelerate depends on whether we are changing lane
+    if (ref_lane_ == target_lane_)
+    {
+        accelerationFactor_ = 0.5;
+    }
+    else
+    {
+        accelerationFactor_ = 0.2;
+    }
+
+    // optimize for initial acceleration
+    if (totalPointsTraveled <= 120)
+    {
+        target_lane_ = ref_lane_;
+        accelerationFactor_ = 0.9;
+    }
+
+    // print out behavior information
+    if (target_lane_ == ref_lane_)
+    {
+        cout << "KEEP LANE ";
+    }
+    else if (target_lane_ < ref_lane_)
+    {
+        cout << "CHANGE LEFT ";
+    }
+    else
+    {
+        cout << "CHANGE RIGHT ";
+    }
+    cout << target_lane_
+         << " current s " << ref_v_
+         << " target s " << target_v_
+         << " points " << totalPointsTraveled
+         << " last " << last_path_reuse_size_
+         << endl;
 }
 
 void Planner::UpdateCarState(double car_x, double car_y, double car_s, double car_d,
@@ -393,10 +436,10 @@ void Planner::UpdateCarState(double car_x, double car_y, double car_s, double ca
     // determine the lane the car is in
     car_lane_ = GetLane(car_d);
 
-    cout << "Car traveling " << car_speed << " mi/hour toward " << car_yaw << " deg in lane " << car_lane_
-         << " xy [" << car_x << "," << car_y << "] "
-         << " ds [" << car_d << "," << car_s << "] "
-         << endl;
+    // cout << "Car traveling " << car_speed << " mi/hour toward " << car_yaw << " deg in lane " << car_lane_
+    //      << " xy [" << car_x << "," << car_y << "] "
+    //      << " ds [" << car_d << "," << car_s << "] "
+    //      << endl;
 }
 
 void Planner::UpdatePreviousPathState(vector<double> &previous_path_x, vector<double> &previous_path_y,
@@ -410,7 +453,7 @@ void Planner::UpdatePreviousPathState(vector<double> &previous_path_x, vector<do
     // determine the number of points to reuse from previous path
     last_path_reuse_size_ = min((int)last_path_x_.size(), maxLastPathReuseSize_);
 
-    cout << "Last path size " << previous_path_x.size() << " reusing " << last_path_reuse_size_ << endl;
+    totalPointsTraveled += (nextPathSize_ - last_path_x_.size());
 }
 
 void Planner::UpdateSensorFusionState(vector<vector<double>> sensor_fusion)
