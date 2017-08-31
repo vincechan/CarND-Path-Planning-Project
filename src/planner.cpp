@@ -7,15 +7,34 @@
 
 using namespace std;
 
-void Planner::ExecutePlanner()
+double Planner::AdjustSpeed(double current_v, double target_v)
 {
-    ComputeReferenceState();
+    //cout << " adjusting speed target " << target_v << " from " << current_v;
 
-    PerformPrediction();
+    double step_v = MAX_ACCELERATION * accelerationFactor_ * dt_;
 
-    PerformBehaviorPlanning();
+    if (current_v < target_v)
+    {
+        // // adjust the acceleration when we are close to the limit
+        // if (current_v + 0.2 >= max_v_) {
+        //     step_v = step_v / 5;
+        // }
 
-    PerformTrajectoryGeneration();
+        current_v += step_v;
+        current_v = min(target_v, current_v);
+    }
+    else if (current_v > target_v)
+    {
+        current_v -= step_v;
+        current_v = max(target_v, current_v);
+    }
+
+    //cout << " to " << current_v << endl;
+    return current_v;
+}
+
+vector<double> Planner::ComputeLaneTargetSpeed()
+{
 }
 
 void Planner::ComputeReferenceState()
@@ -101,9 +120,225 @@ tk::spline Planner::ComputeSpline()
     return s;
 }
 
+void Planner::ExecutePlanner()
+{
+    ComputeReferenceState();
+
+    PerformPrediction();
+
+    PerformBehaviorPlanning();
+
+    PerformTrajectoryGeneration();
+}
+
 int Planner::GetLane(double d)
 {
     return d / this->roadWidth_;
+}
+
+void Planner::InitMap(vector<double> &maps_x, vector<double> &maps_y,
+                      vector<double> &maps_s, vector<double> &maps_dx, vector<double> &maps_dy)
+{
+    map_x_ = maps_x;
+    map_y_ = maps_y;
+    map_s_ = maps_s;
+    map_dx_ = maps_dx;
+    map_dy_ = maps_dy;
+}
+
+void Planner::InitRoad(int numberOfLanes, double laneWidth, double speedLimit, double visibility)
+{
+    roadCount_ = numberOfLanes;
+    roadWidth_ = laneWidth;
+    roadSpeedLimit_ = speedLimit;
+    roadVisibility_ = visibility;
+
+    max_v_ = (roadSpeedLimit_ - 0.15) * MILES_PER_HOUR_2_METERS_PER_SECOND;
+}
+
+void Planner::PerformBehaviorPlanning()
+{
+    target_lane_ = ref_lane_;
+    target_v_ = max_v_;
+
+    double safeChangeLaneDistance = 9.0;
+
+    vector<double> laneScore;
+    for (size_t i = 0; i < roadCount_; i++)
+    {
+        laneScore.push_back(0);
+    }
+
+    for (size_t i = 0; i < roadCount_; i++)
+    {
+
+        // check whether it's safe to be in this lane
+        // TODO: use speed to determine whether the lane is safe
+        if (i == ref_lane_)
+        {
+            // we are already in this lane
+        }
+        else if (i == ref_lane_ - 2)
+        {
+            // left 2 lane
+            if (!(predictedRoadBehindGap_[ref_lane_ - 1] >= safeChangeLaneDistance &&
+                  predictedRoadAheadGap_[ref_lane_ - 1] >= safeChangeLaneDistance &&
+                  predictedRoadBehindGap_[ref_lane_ - 2] >= safeChangeLaneDistance * 2 &&
+                  predictedRoadAheadGap_[ref_lane_ - 2] >= safeChangeLaneDistance * 2))
+            {
+                continue;
+            }
+        }
+        else if (i == ref_lane_ - 1)
+        {
+            // left 1 lane
+            if (!(predictedRoadBehindGap_[ref_lane_ - 1] >= safeChangeLaneDistance &&
+                  predictedRoadAheadGap_[ref_lane_ - 1] >= safeChangeLaneDistance))
+            {
+                continue;
+            }
+        }
+        else if (i == ref_lane_ + 1)
+        {
+            // right 1 lane
+            if (!(predictedRoadBehindGap_[ref_lane_ + 1] >= safeChangeLaneDistance &&
+                  predictedRoadAheadGap_[ref_lane_ + 1] >= safeChangeLaneDistance))
+            {
+                continue;
+            }
+        }
+        else if (i == ref_lane_ + 2)
+        {
+            // right 2 lane
+            if (!(predictedRoadBehindGap_[ref_lane_ + 1] >= safeChangeLaneDistance &&
+                  predictedRoadAheadGap_[ref_lane_ + 1] >= safeChangeLaneDistance &&
+                  predictedRoadBehindGap_[ref_lane_ + 2] >= safeChangeLaneDistance * 2 &&
+                  predictedRoadAheadGap_[ref_lane_ + 2] >= safeChangeLaneDistance * 2))
+            {
+                continue;
+            }
+        }
+        else
+        {
+            // do not consider more than 2 lanes away
+            // note, not possible in this project as we only have 3 lanes on the road.
+            continue;
+        }
+
+        double speed = predictedRoadAheadSpeed_[i];
+        double gap = predictedRoadAheadGap_[i];
+        if (gap <= 10)
+        {
+            // slow down to slower than the car in front
+            speed = speed - 10;
+        }
+        else if (gap >= 30)
+        {
+            speed = max_v_;
+        }
+        else
+        {
+            speed = speed + 1; // close in the gap
+        }
+
+        int numberOfLaneChanges = ref_lane_ - i;
+        if (numberOfLaneChanges < 0)
+        {
+            numberOfLaneChanges = numberOfLaneChanges * -1;
+        }
+
+        // calculate the lane score using a combination of available gap, change lane cost, and speed
+        double gapScore = min(gap, 100.0) + gap / 100.0;
+        double laneChangeScore = numberOfLaneChanges * 6 * -1;
+        double speedScore = 0;
+        if (gap < 40)
+        {
+            speedScore = (ref_v_ - speed) * 2;
+        }
+        laneScore[i] = gapScore + laneChangeScore + laneChangeScore;
+    }
+
+    int bestLane = ref_lane_;
+    double bestlaneScore = laneScore[ref_lane_];
+    for (size_t i = 0; i < roadCount_; i++)
+    {
+        if (laneScore[i] > bestlaneScore)
+        {
+            bestlaneScore = laneScore[i];
+            bestLane = i;
+        }
+    }
+
+    int laneChange = bestLane - ref_lane_;
+    if (laneChange > 1 || laneChange < -1)
+    {
+        // we need to change more than 1 lane
+        // the trajectory generation couldn't handle this without violating acceleration limit in the simulator
+        // we will suggest changing one lane first
+        target_lane_ = 1;
+    }
+    else
+    {
+        target_lane_ = bestLane;
+    }
+
+    if (predictedRoadAheadGap_[ref_lane_] <= 8)
+    {
+        // slow down to slower than the car in front
+        target_v_ = predictedRoadAheadSpeed_[ref_lane_] - 5;
+    }
+    else if (predictedRoadAheadGap_[ref_lane_] >= 24)
+    {
+        target_v_ = max_v_;
+    }
+    else
+    {
+        target_v_ = predictedRoadAheadSpeed_[ref_lane_] + 1;
+    }
+
+    // if the traffic on the road is faster than speed limit, we will stick with speed limit
+    if (target_v_ > max_v_)
+    {
+        target_v_ = max_v_;
+    }
+
+    // adjust how hard we accelerate depends on whether we are changing lane
+    if (ref_lane_ == target_lane_)
+    {
+        accelerationFactor_ = 0.9;
+    }
+    else
+    {
+        accelerationFactor_ = 0.3;
+    }
+
+    // initial start up optimization
+    // when the car first start, use close to max acceleration
+    if (totalPointsTraveled <= 120)
+    {
+        target_lane_ = ref_lane_;
+        accelerationFactor_ = 0.9;
+    }
+
+    // print out behavior information
+    if (target_lane_ == ref_lane_)
+    {
+        cout << "KEEP LANE ";
+    }
+    else if (target_lane_ < ref_lane_)
+    {
+        cout << "CHANGE LEFT ";
+    }
+    else
+    {
+        cout << "CHANGE RIGHT ";
+    }
+    cout << target_lane_
+         << " current s " << ref_v_
+         << " target s " << target_v_
+         << " points " << totalPointsTraveled
+         << " last " << last_path_reuse_size_
+         << endl;
 }
 
 void Planner::PerformPrediction()
@@ -223,202 +458,6 @@ void Planner::PerformTrajectoryGeneration()
     // add the newly generated points to the resulting path
     next_path_x.insert(next_path_x.end(), new_path_x.begin(), new_path_x.end());
     next_path_y.insert(next_path_y.end(), new_path_y.begin(), new_path_y.end());
-}
-
-void Planner::InitMap(vector<double> &maps_x, vector<double> &maps_y,
-                      vector<double> &maps_s, vector<double> &maps_dx, vector<double> &maps_dy)
-{
-    map_x_ = maps_x;
-    map_y_ = maps_y;
-    map_s_ = maps_s;
-    map_dx_ = maps_dx;
-    map_dy_ = maps_dy;
-}
-
-void Planner::InitRoad(int numberOfLanes, double laneWidth, double speedLimit, double visibility)
-{
-    roadCount_ = numberOfLanes;
-    roadWidth_ = laneWidth;
-    roadSpeedLimit_ = speedLimit;
-    roadVisibility_ = visibility;
-
-    max_v_ = (roadSpeedLimit_ - 0.15) * MILES_PER_HOUR_2_METERS_PER_SECOND;
-}
-
-void Planner::PerformBehaviorPlanning()
-{
-    target_lane_ = ref_lane_;
-    target_v_ = max_v_;
-
-    double safeChangeLaneDistance = 9.0;
-    double changeLaneCost = 6.0;
-
-    vector<double> laneScore;
-    for (size_t i = 0; i < roadCount_; i++)
-    {
-        laneScore.push_back(0);
-    }
-
-    for (size_t i = 0; i < roadCount_; i++)
-    {
-
-        // check whether it's safe to be in this lane
-        // TODO: use speed to determine whether the lane is safe
-        if (i == ref_lane_)
-        {
-            // we are already in this lane
-        }
-        else if (i == ref_lane_ - 2)
-        {
-            // left 2 lane
-            if (!(predictedRoadBehindGap_[ref_lane_ - 1] >= safeChangeLaneDistance &&
-                  predictedRoadAheadGap_[ref_lane_ - 1] >= safeChangeLaneDistance &&
-                  predictedRoadBehindGap_[ref_lane_ - 2] >= safeChangeLaneDistance * 2 &&
-                  predictedRoadAheadGap_[ref_lane_ - 2] >= safeChangeLaneDistance * 2))
-            {
-                continue;
-            }
-        }
-        else if (i == ref_lane_ - 1)
-        {
-            // left 1 lane
-            if (!(predictedRoadBehindGap_[ref_lane_ - 1] >= safeChangeLaneDistance &&
-                  predictedRoadAheadGap_[ref_lane_ - 1] >= safeChangeLaneDistance))
-            {
-                continue;
-            }
-        }
-        else if (i == ref_lane_ + 1)
-        {
-            // right 1 lane
-            if (!(predictedRoadBehindGap_[ref_lane_ + 1] >= safeChangeLaneDistance &&
-                  predictedRoadAheadGap_[ref_lane_ + 1] >= safeChangeLaneDistance))
-            {
-                continue;
-            }
-        }
-        else if (i == ref_lane_ + 2)
-        {
-            // right 2 lane
-            if (!(predictedRoadBehindGap_[ref_lane_ + 1] >= safeChangeLaneDistance &&
-                  predictedRoadAheadGap_[ref_lane_ + 1] >= safeChangeLaneDistance &&
-                  predictedRoadBehindGap_[ref_lane_ + 2] >= safeChangeLaneDistance * 2 &&
-                  predictedRoadAheadGap_[ref_lane_ + 2] >= safeChangeLaneDistance * 2))
-            {
-                continue;
-            }
-        }
-        else
-        {
-            // do not consider more than 2 lanes away
-            // note, not possible in this project as we only have 3 lanes on the road.
-            continue;
-        }
-
-        double speed = predictedRoadAheadSpeed_[i];
-        double gap = predictedRoadAheadGap_[i];
-        if (gap <= 10)
-        {
-            // slow down to slower than the car in front
-            speed = speed - 10;
-        }
-        else if (gap >= 30)
-        {
-            speed = max_v_;
-        }
-        else {
-            speed = speed + 1; // close in the gap
-        }
-
-        int numberOfLaneSwitch = ref_lane_ - i;
-        if (numberOfLaneSwitch < 0)
-        {
-            numberOfLaneSwitch = numberOfLaneSwitch * -1;
-        }
-
-        // calculate the lane score using a combination of available gap, change lane cost, and speed
-        laneScore[i] = min(gap, 200.0) - (numberOfLaneSwitch * changeLaneCost) + (speed * dt_ * nextPathSize_);
-    }
-
-    int bestLane = ref_lane_;
-    double bestlaneScore = laneScore[ref_lane_];
-    for (size_t i = 0; i < roadCount_; i++)
-    {
-        if (laneScore[i] > bestlaneScore)
-        {
-            bestlaneScore = laneScore[i];
-            bestLane = i;
-        }
-    }
-
-    int laneChange = bestLane - ref_lane_;
-    if (laneChange > 1 || laneChange < -1)
-    {
-        // we need to change more than 1 lane
-        // the trajectory generation couldn't handle this without violating acceleration limit in the simulator
-        // we will suggest changing one lane first
-        target_lane_ = 1;
-    }
-    else
-    {
-        target_lane_ = bestLane;
-    }
-
-    if (predictedRoadAheadGap_[target_lane_] <= 10)
-    {
-        // slow down to slower than the car in front
-        target_v_ = predictedRoadAheadSpeed_[target_lane_] - 5;
-    }
-    else if (predictedRoadAheadGap_[target_lane_] >= 30)
-    {
-        target_v_ = max_v_;
-    }
-    else {
-        target_v_ = predictedRoadAheadSpeed_[target_lane_] + 1;
-    }
-
-    // if the traffic on the road is faster than speed limit, we will stick with speed limit
-    if (target_v_ > max_v_)
-    {
-        target_v_ = max_v_;
-    }
-
-    // adjust how hard we accelerate depends on whether we are changing lane
-    if (ref_lane_ == target_lane_)
-    {
-        accelerationFactor_ = 0.5;
-    }
-    else
-    {
-        accelerationFactor_ = 0.2;
-    }
-
-    // optimize for initial acceleration
-    if (totalPointsTraveled <= 120)
-    {
-        target_lane_ = ref_lane_;
-        accelerationFactor_ = 0.9;
-    }
-
-    // print out behavior information
-    if (target_lane_ == ref_lane_)
-    {
-        cout << "KEEP LANE ";
-    }
-    else if (target_lane_ < ref_lane_)
-    {
-        cout << "CHANGE LEFT ";
-    }
-    else
-    {
-        cout << "CHANGE RIGHT ";
-    }
-    cout << target_lane_
-         << " current s " << ref_v_
-         << " target s " << target_v_
-         << " points " << totalPointsTraveled
-         << " last " << last_path_reuse_size_
-         << endl;
 }
 
 void Planner::UpdateCarState(double car_x, double car_y, double car_s, double car_d,

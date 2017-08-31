@@ -28,10 +28,13 @@ class Planner
     vector<double> next_path_y;
 
     /**
-     * Run path planner to plan and return a new set of points the car should follow.
+     * Runs the planner to generate a new set of points for the car to follow.
      */
     void ExecutePlanner();
 
+    /**
+     * Initializes configuration data
+     */
     void InitConfig(int nextPathSize, int maxLastPathReuseSize, double dt)
     {
         nextPathSize_ = nextPathSize;
@@ -40,30 +43,30 @@ class Planner
     }
 
     /*
-     * Initialize map data 
+     * Initializes map data 
      */
     void InitMap(vector<double> &maps_x, vector<double> &maps_y,
                  vector<double> &maps_s, vector<double> &maps_dx, vector<double> &maps_dy);
 
     /**
-     * Initialize road data
+     * Initializes road data
      */
     void InitRoad(int numberOfLanes, double laneWidth, double speedLimit, double roadVisibility);
 
     /**
-     * Update car data
+     * Update cars data
      */
     void UpdateCarState(double car_x, double car_y, double car_s, double car_d,
                         double car_yaw, double car_speed);
 
     /**
-     * Update previous path data
+     * Updates previous path data
      */
     void UpdatePreviousPathState(vector<double> &previous_path_x, vector<double> &previous_path_y,
                                  double previous_path_end_s, double previous_path_end_d);
 
     /**
-     * Update sensor fusion data
+     * Updates sensor fusion data
      */
     void UpdateSensorFusionState(vector<vector<double>> sensor_fusion);
 
@@ -163,70 +166,48 @@ class Planner
     int target_lane_;
     double target_v_;
 
+    /**cd 
+     * Adjusts the speed to target speed.
+     */
+    double AdjustSpeed(double current_v, double target_v);
+
     /**
-     * Compute the reference state.
-     * We are reusing some points from previous path. The reference state
-     * is the car state when previous path reuse point ends.
+     * Compute target speed for each lane
+     */
+    vector<double> ComputeLaneTargetSpeed();
+
+    /**
+     * Computes the reference state, this is the state the car is in at the first generated new point. 
      */
     void ComputeReferenceState();
 
     /**
-     * Create a spline from the reference point
+     * Creates a spline from the reference point
      */
     tk::spline ComputeSpline();
 
     /**
-     * Return the lane given the d value
+     * Computes the lane given the frenet d value
      */
     int GetLane(double d);
 
     /**
-     * Perform behavior planning.
+     * Performs behavior planning.
      */
     void PerformBehaviorPlanning();
 
     /**
-     * Perform prediction of other cars on the road.
+     * Performs prediction.
      */
     void PerformPrediction();
 
     /**
-     * Perform trajectory generation.
+     * Performs trajectory generation.
      */
     void PerformTrajectoryGeneration();
 
     /**
-     * Adjust the speed of the car
-     * The function will handle the rate of change so that it does not violate acceleration limit.
-     */
-    double AdjustSpeed(double current_v, double target_v)
-    {
-        //cout << " adjusting speed target " << target_v << " from " << current_v;
-
-        double step_v = MAX_ACCELERATION * accelerationFactor_ * dt_;
-
-        if (current_v < target_v)
-        {
-            // // adjust the acceleration when we are close to the limit
-            // if (current_v + 0.2 >= max_v_) {
-            //     step_v = step_v / 5;
-            // }
-
-            current_v += step_v;
-            current_v = min(target_v, current_v);
-        }
-        else if (current_v > target_v)
-        {
-            current_v -= step_v;
-            current_v = max(target_v, current_v);
-        }
-
-        //cout << " to " << current_v << endl;
-        return current_v;
-    }
-
-    /**
-     * convert local coordinates back to global coordinates
+     * Converts local coordinates back to global coordinates
      */
     static void ToGlobalCoordinates(
         vector<double> &x_points, vector<double> &y_points, double ref_x, double ref_y, double ref_yaw)
@@ -242,7 +223,7 @@ class Planner
     }
 
     /**
-     * convert global coordinates to local coordinates
+     * Converts global coordinates to local coordinates
      */
     static void ToLocalCoordinates(
         vector<double> &x_points, vector<double> &y_points, double ref_x, double ref_y, double ref_yaw)
