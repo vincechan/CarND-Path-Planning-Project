@@ -89,7 +89,7 @@ class Planner
     // to control the rate of acceleration.
     double accelerationFactor_ = 0.5;
 
-    int totalPointsTraveled = 0;
+    int pathPointCount = 0;
 
     /**
      * Map data
@@ -119,6 +119,8 @@ class Planner
     vector<double> predictedRoadAheadSpeed_;
     // speed of the car behind in each lane
     vector<double> predictedRoadBehindSpeed_;
+    // target speed in each lane
+    vector<double> predictedRoadTargetSpeed_;
 
     // how fast we allow the car to go
     double max_v_;
@@ -172,11 +174,6 @@ class Planner
     double AdjustSpeed(double current_v, double target_v);
 
     /**
-     * Compute target speed for each lane
-     */
-    vector<double> ComputeLaneTargetSpeed();
-
-    /**
      * Computes the reference state, this is the state the car is in at the first generated new point. 
      */
     void ComputeReferenceState();
@@ -190,6 +187,11 @@ class Planner
      * Computes the lane given the frenet d value
      */
     int GetLane(double d);
+
+    /**
+     * Determines if the given lane is safe
+     */
+    bool IsLaneSafe(int lane);
 
     /**
      * Performs behavior planning.
